@@ -7,6 +7,10 @@ All notable changes to the **FlowForge AI** project will be documented in this f
 ## [0.2.0] - 2026-08-22
 
 ### Added
+- **Phase 2.4 — Sequence Flows & Runtime Interaction Designs**:
+  - Created `docs/05-sequence-flows.md` specifying critical runtime sequence flows using Mermaid diagrams.
+  - Defined interaction sequence designs for atomic job claiming, sandbox task execution, liveness heartbeats & Reaper sweep loops, cron trigger scheduler occurrence prevention, and batch child completion.
+  - Specified locking order correctness constraints and conditional fencing write rules to guarantee system isolation.
 - **Phase 2.3 — API Contracts & Database Design**:
   - Created `docs/04-api-contracts-and-database-design.md` detailing the logical PostgreSQL schema, composite indices, and constraints.
   - Formulated the concurrent claiming query utilizing `SELECT FOR UPDATE SKIP LOCKED` and database-level fencing token invariants.
