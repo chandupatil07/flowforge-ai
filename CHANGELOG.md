@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.2] - 2026-08-22
+
+### Added
+- **Phase 1 Final Addendum Corrections**:
+  - Defined default missed window grace period (15 minutes) and policies (`RUN_ONCE`, `FORCE_RUN`, `SKIP`) for recurring jobs, including uniqueness checks to prevent duplicate execution.
+  - Specified batch terminal state conditions and configurable callback trigger conditions.
+  - Added a default job payload JSON size limit of 100 KB with HTTP 413 error code validation before DB insertion.
+  - Added API rate-limiting requirements to the job creation endpoint (`POST /api/v1/projects/{project_id}/jobs`).
+
+---
+
 ## [0.1.1] - 2026-08-22
 
 ### Changed

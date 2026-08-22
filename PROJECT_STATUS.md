@@ -30,6 +30,7 @@ This document tracks the execution phases, milestone status, file modifications,
   - [x] Initial technology stack proposed
   - [x] Documentation foundation created (`.gitignore`, `README.md`, `PROJECT_STATUS.md`, `CHANGELOG.md`, `docs/01-project-requirements.md`)
   - [x] REVISED: Strengthened requirements based on independent review (Timeouts, Queue Concurrency, Execution Model, Fencing, Heartbeats, RBAC, Idempotency, AI UI, Log Retention, Testing Specs)
+  - [x] ADDENDUM: Incorporated Phase 1 Final Addendum corrections (Cron missed window policies, Batch terminal states & callback triggers, Job payload size limits, and job creation route rate limiting)
 - [ ] **PHASE 2: System Architecture** (NOT STARTED)
 - [ ] **PHASE 3: Database Design** (NOT STARTED)
 - [ ] **PHASE 4: Backend Foundation** (NOT STARTED)
@@ -65,6 +66,11 @@ This document tracks the execution phases, milestone status, file modifications,
   - Decoupled AI failure diagnostics with UI-independent states (`NOT_REQUESTED`, `ANALYZING`, `COMPLETED`, `FAILED`, `UNAVAILABLE`).
   - Added Log Retention policies (30 days successful / 90 days failed), 100KB log truncation limits, and sensitive data masking.
   - Expanded Testing requirements with 12 requirements-level scenario specifications.
+- **ADDENDUM**: Incorporated Phase 1 Final Addendum corrections:
+  - Defined default missed window grace period (15 minutes) and policies (`RUN_ONCE`, `FORCE_RUN`, `SKIP`) for recurring jobs, including composite uniqueness constraints `(cron_config_id, scheduled_for)` to prevent duplicate execution.
+  - Specified batch terminal state conditions (all child jobs completed or in DLQ) and configurable callback trigger options (`ALWAYS`, `ON_SUCCESS`, `ON_FAILURE`, `NEVER`).
+  - Established a default job payload JSON size limit of 100 KB with HTTP 413 validation rejection at the API gateway layer to protect database storage and query performance.
+  - Added API rate limiting requirement to the job submission route (`POST /api/v1/projects/{project_id}/jobs`).
 
 ### In-Progress Work
 - None (Phase 1 revisions completed; stopping to wait for final review and approval).

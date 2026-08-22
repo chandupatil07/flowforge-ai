@@ -93,13 +93,19 @@ Each project can define multiple queues. Queues have the following characteristi
 ## 9. Job Requirements
 Each job is a task record containing:
 - **Identifier**: Globally unique UUID.
-- **Payload**: JSON dictionary containing arguments for the task execution.
+- **Payload**: JSON dictionary containing arguments for the task execution, restricted to a maximum size of **100 KB** to protect database storage, query performance, and worker memory resources.
 - **Target Handler**: Name of the Python function or task class that the worker must run (e.g., `tasks.send_email`).
 - **Status**: The current state of the job in the lifecycle.
 - **Priority**: Overridable priority at the job level.
 - **Retry Policy**: Definition of maximum retry counts and backoff settings.
 - **Timestamps**: `created_at`, `scheduled_for`, `claimed_at`, `started_at`, `finished_at`.
 - **Idempotency Key**: Optional client-supplied key to prevent duplicate job insertion.
+
+### 9.2 Job Payload Size Limits
+To safeguard the system from resource abuse and ensure quick query response times:
+- **Payload Size Restriction**: The API must enforce a default payload size limit of **100 KB** (102,400 bytes). This limit is checked before the job record is accepted.
+- **API Rejection Behavior**: If a client submits a job with a payload exceeding 100 KB, the API must reject the request immediately, returning HTTP `413 Payload Too Large` with a structured validation error response.
+- **Configurability**: While the default system limit is 100 KB, the threshold can be adjusted globally via system configurations during the architecture and implementation phases if required.
 
 ### 9.1 Job Timeout Policy
 A formal policy manages how jobs that hang or exceed execution limits are handled:
@@ -147,12 +153,38 @@ A formal policy manages how jobs that hang or exceed execution limits are handle
 - A scheduler process/thread regularly checks recurring configurations and inserts a new job record with `scheduled_for` set to the next calculated trigger time.
 - Prevents overlapping executions: If a previously scheduled run is still running or queued, the system can be configured to either skip the next run or queue it anyway.
 
+### 13.1 Missed Execution Window Behavior
+When the scheduler or database is offline or unavailable during a scheduled cron trigger time, a "missed window" occurs. The system must adhere to the following rules:
+- **Default Behavior (RUN_ONCE)**: Upon system recovery, the scheduler evaluates missed executions against a default **grace period of 15 minutes** from the originally scheduled trigger time.
+  - If recovery happens *within* 15 minutes of the scheduled trigger, the scheduler queues exactly one catch-up job execution.
+  - If recovery happens *after* 15 minutes, the missed run is **skipped** (bypassed), and the scheduler sets up the next upcoming cron trigger to prevent outdated job backlogs.
+- **Configurability**: Each cron configuration can override the default missed run behavior via a `missed_run_policy` parameter:
+  - `RUN_ONCE` (Default): Run one catch-up job if within the grace threshold; skip if older.
+  - `FORCE_RUN`: Always run exactly one catch-up job upon recovery, regardless of how long ago it was missed.
+  - `SKIP`: Never run catch-up jobs; always discard missed executions and wait for the next scheduled occurrence.
+- **Duplicate Execution Prevention**:
+  - To prevent duplicate queueing during scheduler restarts or concurrent instances, the database/scheduler must track scheduled occurrences. A unique constraint on `(cron_config_id, scheduled_for)` ensures that a specific scheduled run timestamp for a cron definition can only ever be queued once.
+
 ---
 
 ## 14. Batch Jobs
 - **Grouping**: Ability to aggregate multiple independent job records into a single parent `Batch`.
 - **Progress Tracking**: The batch record tracks overall statistics (e.g., Total Jobs: 100, Completed: 75, Failed: 5, Remaining: 20).
-- **Callbacks**: Configurable trigger jobs that execute automatically once all jobs in the batch have reached a terminal state (`COMPLETED` or `DLQ`).
+- **Callbacks**: Configurable trigger jobs that execute automatically once all jobs in the batch have reached a terminal state.
+
+### 14.1 Batch Terminal States and Callbacks
+To guarantee robust batch processing, the system defines terminal batch behavior and callback conditions:
+- **Terminal State Definition**: A batch is considered **terminal** when all child jobs associated with it have completed execution. There must be no child jobs in `QUEUED`, `CLAIMED`, or `RUNNING` states. Every child job must end in a terminal state: `COMPLETED` or `DLQ`.
+- **Batch State Contribution**:
+  - If **all** child jobs complete successfully (`COMPLETED`), the batch state resolves to `SUCCESS`.
+  - If **at least one** child job permanently fails (ends in `DLQ`), the batch state resolves to `FAILED`.
+- **Callback Firing Rules**:
+  - By default, the batch callback job fires when the batch reaches a terminal state, regardless of whether the overall batch succeeded or failed.
+  - The firing condition can be overridden using a `callback_trigger_condition` parameter configured on the batch:
+    - `ALWAYS` (Default): Trigger the callback once all child jobs are terminal.
+    - `ON_SUCCESS`: Trigger the callback only if all child jobs resolved to `COMPLETED`.
+    - `ON_FAILURE`: Trigger the callback only if at least one child job resolved to `DLQ`.
+    - `NEVER`: Disables the callback from firing.
 
 ---
 
@@ -389,7 +421,9 @@ An interactive Single Page Application (SPA) built with React and Vite:
 - **Transport Security**: Require HTTPS in production environments.
 - **SQL Injection Prevention**: Ensure all database operations are performed via SQLAlchemy's ORM or prepared parameters (no raw string interpolation).
 - **Access Isolation**: Verify the user belongs to the project of the job they are querying/updating at the controller level.
-- **Rate Limiting**: Apply basic API rate limits (e.g., max 100 requests per minute per IP for authentication routes) to prevent brute-force attacks.
+- **Rate Limiting**:
+  - Apply basic API rate limits (e.g., max 100 requests per minute per IP for authentication routes) to prevent brute-force attacks.
+  - Job creation endpoints, specifically `POST /api/v1/projects/{project_id}/jobs`, must be protected by an appropriate rate limit to prevent denial-of-service (DoS) attempts and database CPU spikes. The architecture and implementation phase will determine the exact rate-limit thresholds and window configurations.
 
 ---
 
