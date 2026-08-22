@@ -57,13 +57,20 @@ Modern distributed applications rely heavily on background workers for asynchron
 
 ---
 
-## 6. Authentication Requirements
+## 6. Authentication & Authorization Requirements
 - **User Management**: Sign-up and login endpoints with secure password hashing (using `bcrypt`).
 - **Session Security**: Token-based authentication using JSON Web Tokens (JWT) with configurable expiration (e.g., 24 hours).
-- **Authorization**: Role-Based Access Control (RBAC) supporting:
-  - **Admin**: Full access to all projects, queues, and configuration in the organization.
-  - **Member**: Can view status, queue new jobs, and manually retry jobs within authorized projects.
-  - **ReadOnly**: Can view dashboard metrics and logs but cannot modify configurations or execute operations.
+- **Role-Based Access Control (RBAC)**: The system enforces the following permissions within a project or organization:
+  - **Project Owner**: Full administrative privileges over the project.
+    - Permissions: Manage project settings, configure queue priority/concurrency settings, create/pause/resume queues, inspect all jobs, view AI failure analysis, purge/delete jobs, and manage project member access.
+  - **Developer**: Full operational privileges.
+    - Permissions: Create and submit new jobs, view execution logs, view AI failure analysis, and trigger manual retries on failed or DLQ jobs. *Cannot* modify project/queue configurations or manage project members.
+  - **Operator / Admin**: Operational monitoring and retry privileges.
+    - Permissions: View system health metrics, monitor workers, view all queues, inspect job lists/logs, and trigger manual retries. *Cannot* create new jobs, edit queue configurations, or manage project members.
+- **Project-Level Resource Isolation**:
+  - The system must enforce strict isolation boundaries. All database query contexts must be scoped to the authorized `project_id` associated with the user's security token.
+  - A user context must not be allowed to access, list, modify, or schedule queues, jobs, execution logs, or worker mappings of another project unless explicitly authorized with a valid role in that target project.
+
 
 ---
 
@@ -93,6 +100,25 @@ Each job is a task record containing:
 - **Retry Policy**: Definition of maximum retry counts and backoff settings.
 - **Timestamps**: `created_at`, `scheduled_for`, `claimed_at`, `started_at`, `finished_at`.
 - **Idempotency Key**: Optional client-supplied key to prevent duplicate job insertion.
+
+### 9.1 Job Timeout Policy
+A formal policy manages how jobs that hang or exceed execution limits are handled:
+- **Definition**: A job timeout is the maximum duration in seconds that a worker process is allowed to spend executing a specific job.
+- **Configurability**: Every job can specify a custom `timeout` (in seconds) in its metadata configuration.
+- **Default & Maximum Values**:
+  - **Default Timeout**: 60 seconds (applied automatically if no custom timeout is defined).
+  - **Maximum Timeout**: 3600 seconds (1 hour, to prevent runaway tasks from exhausting system resource capacity).
+- **Execution Termination**:
+  - The coordinator must terminate the isolated job execution process when the configured timeout is exceeded. The implementation must use the platform-appropriate process termination mechanism (for example, sending `SIGTERM` and escalating to `SIGKILL` if unresponsive on POSIX systems, or terminating the process tree on Windows) and must guarantee that a timed-out job cannot continue consuming worker execution capacity.
+- **Status Marking & Retries**:
+  - A timed-out job is marked as `FAILED` in the database, with its error message set to `JOB_TIMEOUT`.
+  - The timeout event consumes exactly one retry attempt, incrementing the execution attempt count.
+  - If the incremented attempt count is strictly less than `max_retries`, the job is scheduled for another run following the backoff policy.
+  - If it matches or exceeds `max_retries`, the job is moved directly to the Dead Letter Queue (`DLQ`).
+- **Interaction with Worker Heartbeats**:
+  - The timed-out job's termination does *not* indicate worker node failure. The main worker process remains healthy, continues to transmit heartbeats to the database, and is freed to poll and execute new jobs.
+  - This is distinct from worker failure, which is characterized by the worker process becoming completely unresponsive (stops sending heartbeats entirely).
+
 
 ---
 
@@ -135,9 +161,47 @@ Workers are independent OS processes that:
 - **Register**: Upon startup, write a new row to the `workers` table with metadata (host name, PID, concurrency capacity).
 - **Poll**: Run a continuous loop querying the database for available jobs.
 - **Claim**: Atomically update job rows from `QUEUED` to `CLAIMED` and associate them with their `worker_id`.
-- **Execute**: Run task code concurrently using an asynchronous event loop or thread/process pools.
+- **Execute**: Run task code concurrently.
 - **Report**: Write final execution results, timestamps, and stack traces back to the database.
 - **Deregister**: Safely clean up their database record upon graceful shutdown.
+
+### 15.1 Worker Execution Model
+An explicit execution model is required to define how worker instances handle concurrent executions, bypass the Python Global Interpreter Lock (GIL), isolate user-defined task execution to prevent crashes from cascading to the worker daemon, and provide deterministic execution timeouts.
+
+#### Concurrency Mechanism Comparison
+Below is a conceptual comparison of the primary concurrency mechanisms available in Python:
+
+| Model | Concurrency Type | GIL Impact | Resource Overhead | Isolation | Timeout Termination |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Async (asyncio)** | Cooperative (Single Thread) | Locked (CPU blocks loop) | Extremely Low | None (shared space) | Hard (cannot kill sync/CPU blocks) |
+| **Threads (threading)** | Preemptive (Shared Memory) | Locked (GIL active) | Low | Low (memory corruption risk) | Impossible (no native thread kill) |
+| **Processes (multiprocessing)** | Preemptive (Isolated Memory) | Bypassed (True CPU parallelism) | Moderate/High | High (crashes don't impact parent) | Easy (SIGTERM/SIGKILL target pid) |
+
+#### Selected Approach: Hybrid Async Coordinator + Process-Based Execution
+FlowForge AI requires a **Hybrid Async Coordinator with a Process-Based Execution** model:
+
+##### Async Coordinator
+The main worker process runs an asynchronous event loop (`asyncio`) and is responsible conceptually for:
+- **Database polling**: Periodically checking the database for new jobs to execute.
+- **Worker registration**: Registering the worker instance metadata in the database on startup.
+- **Heartbeat**: Sending periodic liveness heartbeats to the database.
+- **Job supervision**: Supervising child execution processes and handling finished job status writes.
+- **Lifecycle coordination**: Coordinating graceful shutdown signals (SIGINT/SIGTERM).
+
+##### Process-Based Job Execution
+Each job claimed by the coordinator is dispatched to run inside an isolated process using a platform-appropriate multiprocessing strategy. This isolated process is responsible conceptually for:
+- **Executing individual jobs**: Executing the target Python job code and capturing output logs.
+- **Isolation**: Keeping variables, libraries, and crash states completely separate from other tasks and the coordinator process.
+- **CPU-bound work**: Running heavy CPU calculations without blocking the worker coordinator's event loop.
+- **Timeout enforcement**: Allowing the coordinator to monitor elapsed execution time and terminate the process if it times out.
+- **Failure containment**: Preventing segmentation faults, memory leaks, or unhandled exceptions in the job code from crashing the main worker process.
+
+#### Justification for Selected Model
+This hybrid model is selected to maximize reliability and simplicity in a Python/FastAPI environment:
+1. **GIL Bypass**: Necessary to handle heavy CPU-bound tasks and network I/O concurrently without blocking worker heartbeats.
+2. **Reliability and Fault Isolation**: A fatal error (e.g., segfault) in a job only kills the individual child process, leaving the worker coordinator active to log the failure and claim new jobs.
+3. **Robust Timeout Termination**: Since threads cannot be killed natively in Python, process-based isolation is the only way to guarantee that a timed-out job can be forcefully terminated without leaving orphan task executions consuming system capacity.
+
 
 ---
 
@@ -189,13 +253,47 @@ The platform supports three standard backoff mathematical models:
 
 ---
 
-## 20. Worker Heartbeat Requirements
-- **Interval**: Active workers must write a heartbeat timestamp to the database every 5 seconds.
-- **Liveness Checking**: A background reaper process looks for workers with a heartbeat older than 15 seconds.
-- **Orphan Recovery**: If a worker is deemed offline:
-  - Mark worker status as `OFFLINE`.
-  - Find all jobs marked `RUNNING` or `CLAIMED` under that worker.
-  - Reset their status to `QUEUED` (incrementing retry count) or move them to `DLQ` if they have exhausted retries.
+## 20. Worker Heartbeat & Failure Recovery Requirements
+- **Heartbeat Interval**: Active workers must write a heartbeat timestamp to their registered row in the `workers` table every 5 seconds.
+- **Liveness Checking Daemon**: A centralized, periodic background reaper process (run every 10 seconds) queries the database to identify unhealthy workers.
+- **Failure Threshold**: A worker is declared `OFFLINE` (dead) if its last heartbeat timestamp is older than 15 seconds.
+
+### 20.1 Worker Failure Semantics
+When a worker is declared dead, its owned jobs must transition through the recovery pipeline:
+- **Orphan Recovery Procedure**:
+  - The reaper identifies all jobs associated with the dead `worker_id` that are in a `CLAIMED` or `RUNNING` state.
+  - For each orphaned job, the reaper checks if the job's execution attempt count has exhausted the retry policy (`attempts >= max_retries`).
+  - If attempts are exhausted, the job is moved directly to the Dead Letter Queue (`DLQ`).
+  - If retries remain, the job's status is reset to `QUEUED`, its worker assignment is cleared, its attempt count is incremented, and its `scheduled_for` timestamp is set to `now() + backoff_delay` (making it immediately eligible for claim by other active workers after backoff).
+
+### 20.2 Heartbeat / Reaper / Retry Race Condition
+A critical distributed systems race condition exists in heartbeat-based failover designs:
+1. **Worker A** claims **Job X** and starts running a long-running CPU task.
+2. Due to high local CPU usage, database connection pool exhaustion, or a temporary network drop, **Worker A** fails to update its heartbeat row for 16 seconds.
+3. The **Reaper** runs, identifies **Worker A** as dead, marks it `OFFLINE`, and recovers **Job X** (resetting its state to `QUEUED`).
+4. **Worker B** polls the database, claims **Job X**, and begins executing it.
+5. Meanwhile, **Worker A** completes **Job X** and attempts to write `status = 'COMPLETED'` to the database.
+*Result*: Duplicate execution and corrupted job state, where two workers concurrently run and try to finalize the same job.
+
+### 20.3 Correctness Guarantee via Fencing & Ownership Tokens
+To prevent duplicate state writes and ensure correctness, the system must enforce the following fencing rules:
+- **Ownership Fencing Identity**:
+  - Every job row must maintain an `ownership_token` (e.g., a unique UUID generated during the claim transaction) or a monotonically increasing `version_id`.
+  - When a worker claims a job, a new unique `ownership_token` is generated and saved in the job record alongside the worker assignment.
+- **Stale Update Rejection**:
+  - When any worker completes or fails a job and attempts to write its final state, the SQL statement must include a conditional check:
+    ```sql
+    UPDATE jobs
+    SET status = :final_status, finished_at = now()
+    WHERE id = :job_id AND worker_id = :worker_id AND ownership_token = :ownership_token;
+    ```
+  - If the reaper has already recovered the job, it will have cleared the worker assignment or updated the `ownership_token`. Thus, the stale worker's update query will match 0 rows.
+- **Worker Self-Abortion**:
+  - If a worker's update query returns a affected-rows count of 0, the worker must recognize it has lost ownership.
+  - The worker must discard the task results, abort any further operations related to the job, and log a critical warning indicating it executed a stale task.
+- **Liveness Recovery Catch-up**:
+  - If a worker recovers from a temporary network partition and finds that its own registration has been marked `OFFLINE` or its executing job has been reassigned, it must terminate its active child tasks and re-register itself.
+
 
 ---
 
@@ -213,6 +311,20 @@ The platform supports three standard backoff mathematical models:
 - Every attempt to run a job must be recorded in an `execution_logs` table.
 - **Fields**: `id`, `job_id`, `worker_id`, `attempt_number`, `started_at`, `finished_at`, `status` (`SUCCESS` or `FAILURE`), `stdout`, `stderr`, `error_message`, and `stack_trace`.
 - Logs must be persistent even if the job itself is deleted or moved to DLQ.
+
+### 22.1 Log Retention & Maintenance Policy
+To prevent execution logs from causing infinite database growth, the system must enforce the following log retention rules:
+- **Configurable Retention Period**:
+  - **Successful Jobs**: Logs are retained in the database for 30 days by default.
+  - **Failed & DLQ Jobs**: Logs are retained in the database for 90 days by default to permit operator debugging and post-mortem analysis.
+- **Pruning Mechanism**:
+  - The background reaper process must execute a daily pruning task to delete log entries older than the configured threshold.
+- **Size Limits & Truncation**:
+  - Individual job executions must restrict their captured `stdout` and `stderr` logs to a maximum limit (e.g., 100KB per run).
+  - If log output exceeds this threshold, the worker must truncate the log and append a warning message: `... [LOG TRUNCATED BY FLOWFORGE - EXCEEDED 100KB LIMIT]`.
+- **Sensitive Data Protection**:
+  - Capturing logs must implement a pre-save check that masks environment variables, API tokens, authorization headers, passwords, and private keys matching predefined regular expressions before writing them to the database (replacing them with `[MASKED]`).
+
 
 ---
 
@@ -282,8 +394,8 @@ An interactive Single Page Application (SPA) built with React and Vite:
 ---
 
 ## 28. AI Failure-Analysis Requirements
-- **Integration**: A background layer triggered either automatically upon job transition to `FAILED`/`DLQ`, or manually via UI request.
-- **AI Core Functionality**: Reads the job payload, handler metadata, execution logs, and full python stack trace. Feeds this data into a local text-generation LLM or lightweight API.
+- **Integration**: A background layer triggered either automatically upon job transition to `FAILED` or `DLQ` state, or manually via a UI request.
+- **AI Core Functionality**: Reads the job payload, handler metadata, execution logs, and full Python exception stack trace. Feeds this data into a local text-generation LLM or lightweight API.
 - **Analysis Schema**: Returns a JSON structure:
   ```json
   {
@@ -294,7 +406,24 @@ An interactive Single Page Application (SPA) built with React and Vite:
     "retry_recommendation": "Whether retrying is likely to succeed or if it will fail deterministically"
   }
   ```
-- **Failsafe Design**: The core scheduling and execution engine must **never** depend on the availability of the AI service. If the AI model crashes, runs out of memory, or fails to respond, jobs must still execute, retry, and transition to DLQ as normal.
+- **Failsafe & Decoupled Design**:
+  - The core scheduling, execution, heartbeat, and retry engine must **never** depend on the availability of the AI service.
+  - If the AI service is offline, crashes, runs out of memory, or fails to respond, jobs must still execute, retry, and transition to DLQ exactly as normal.
+  - AI analysis execution must run asynchronously and outside of the critical transactional flow of worker execution loops (to prevent blocking worker threads or DB locks).
+
+### 28.1 AI Analysis Lifecycle States & UI Behavior
+To prevent confusing system operators, the dashboard UI and backend must track the state of the failure analysis independently from the job execution state:
+- **AI Analysis States**:
+  - `NOT_REQUESTED`: No failure analysis has been triggered yet.
+  - `ANALYZING`: The analysis task is currently executing in the background.
+  - `COMPLETED`: Analysis was successfully completed, and the results are ready to view.
+  - `FAILED`: Analysis was attempted but the model execution failed or timed out.
+  - `UNAVAILABLE`: The AI subsystem is globally disabled or offline.
+- **UI Dashboard Requirements**:
+  - The dashboard must clearly distinguish between the job's terminal execution state (`FAILED` or `DLQ`) and the status of the AI diagnostics.
+  - Under no circumstances should the dashboard show a generic error or indicate that job management is broken if the AI service fails. It should display a clean notification: `"AI Failure Diagnostics: Unavailable"` or `"AI Diagnostics: Failed"`, while still displaying the raw stack traces and logs.
+  - A failure or error in the AI analysis task **MUST NOT** modify or disrupt the actual job state or prevent manual retries.
+
 
 ---
 
@@ -308,24 +437,47 @@ An interactive Single Page Application (SPA) built with React and Vite:
 ## 30. Concurrency Requirements
 - **Atomic Claiming**: Avoid double-claiming using the following pattern:
   ```sql
-  UPDATE jobs 
+  UPDATE jobs
   SET status = 'CLAIMED', worker_id = :worker_id, claimed_at = now()
   WHERE id = (
-      SELECT id FROM jobs 
+      SELECT id FROM jobs
       WHERE status = 'QUEUED' AND scheduled_for <= now()
       ORDER BY priority DESC, created_at ASC
-      LIMIT 1 
+      LIMIT 1
       FOR UPDATE SKIP LOCKED
   )
   RETURNING *;
   ```
-- **Queue-Level Locks**: Track queue-level concurrent runs using an active executions counter or aggregate query during the claim filter step to respect `concurrency_limit` restrictions.
+- **Queue-Level Concurrency Limit Invariant**:
+  - For any queue with concurrency limit $N$, the number of actively executing jobs (defined as jobs in `CLAIMED` or `RUNNING` status) must **never** exceed $N$ globally across all workers.
+  - *Example*: If Queue X has a concurrency limit of 2, and four workers (A, B, C, and D) are polling the queue simultaneously, at most 2 jobs from Queue X can be actively executing at any point.
+- **Atomic Concurrency Verification**:
+  - Checking the concurrency limit and claiming the job must be performed as a single atomic operation within a transaction to prevent race conditions.
+  - When a worker attempts to claim a job, the select query MUST dynamically filter out any jobs belonging to queues that have already reached or exceeded their concurrency limit.
+  - Specifically, candidate jobs are selected for locking only if:
+    $$\text{Active Jobs in Queue } (\text{status} \in \{\text{'CLAIMED'}, \text{'RUNNING'}\}) < \text{Queue Concurrency Limit } N$$
+  - Under database transactions, a database-level lock (such as row-level locks on the `queues` and `jobs` tables using `FOR UPDATE`) must isolate the query execution, preventing concurrent worker claim operations from violating the limit.
+
 
 ---
 
 ## 31. Idempotency Requirements
-- **Idempotency Keys**: Jobs can be created with an optional `idempotency_key` (UUID or unique string).
-- **Enforcement**: If a second request tries to schedule a job with the same `idempotency_key` within a project, the API will reject the request with HTTP 409 or return the existing job's details instead of creating a duplicate row.
+- **Idempotency Key Definition**:
+  - An idempotency key is a client-generated unique identifier (such as a UUIDv4 or a cryptographic hash of the job payload, parameters, and handler name) passed during task submission.
+- **Scoping & Uniqueness**:
+  - The uniqueness constraint must be project-scoped, defined conceptually as the composite key:
+    $$(\text{project\_id}, \text{idempotency\_key})$$
+  - This prevents conflicts between different projects while ensuring absolute uniqueness within a single tenant project namespace.
+- **Supported Operations**:
+  - The job creation/scheduling REST endpoint: `POST /api/v1/projects/{project_id}/jobs`.
+- **Handling Duplicate Submissions**:
+  - If a job submission request is received with a duplicate `(project_id, idempotency_key)` pair:
+    - **In-flight or Terminal Success (`QUEUED`, `RUNNING`, `COMPLETED`)**: The API must not queue a new job. Instead, it must intercept the request and return an HTTP `200 OK` (or `201 Created` depending on design preference) with the exact payload and current state of the existing job.
+    - **Failed or DLQ State**: If the existing job is in a `FAILED` or `DLQ` state, the API must return the existing job's details to the client (informing them of the failure state). This avoids silent duplicate queue creation and prompts the client to utilize the manual retry endpoint or submit with a fresh key.
+- **Retention & Purging Policy**:
+  - Idempotency records must be retained in the database for a configurable retention window (default: 24 hours).
+  - A background cleanup process (reaper) must delete expired idempotency key associations periodically to prevent unbounded database growth.
+
 
 ---
 
@@ -336,6 +488,22 @@ An interactive Single Page Application (SPA) built with React and Vite:
   - Integration tests for retry algorithms, backoff calculations, and DLQ logic.
 - **Mocking**: Full mock suite for the AI model component to ensure test runs do not require a live GPU or internet connection.
 - **Frontend Tests**: Basic component validation and route transition tests using Jest or Vitest.
+
+### 32.1 Requirements-Level Failure Scenario Test Specifications
+To ensure the reliability of the system, the test suites must explicitly cover the following edge cases and failure modes:
+1. **Job Timeout Execution**: Test that a job running longer than its configured timeout is forcefully terminated, its status is marked `FAILED` in the database, the exception log reports `JOB_TIMEOUT`, and exactly one retry attempt is consumed.
+2. **Retry after Timeout**: Verify that a job failing due to timeout is rescheduled for execution in the future based on the correct backoff delay.
+3. **Max Retry to DLQ**: Test that when a job's execution attempt count reaches `max_retries`, the job is transitioned directly to the Dead Letter Queue (`DLQ`).
+4. **Queue Concurrency Limits**: Test that when Queue X has a concurrency limit of $N$, executing $M$ ($M > N$) parallel jobs from Queue X results in exactly $N$ jobs running simultaneously, while the remaining $M - N$ jobs stay in the `QUEUED` state.
+5. **Simultaneous Worker Claims**: Simulate high concurrency by having multiple workers simultaneously execute the claiming query; verify that no single job is double-claimed or executed twice.
+6. **Worker Heartbeat Loss**: Test that when a worker process stops updating its heartbeat row, the reaper identifies it as `OFFLINE` within the configured failure threshold (15s).
+7. **Dead Worker Recovery**: Verify that when a worker goes `OFFLINE`, the reaper finds its executing jobs, increments their retry count, and resets their status to `QUEUED` (or transitions them to the DLQ if retries are exhausted).
+8. **Stale Worker Update Rejection**: Simulate a slow worker where a network split causes its heartbeat to lag, resulting in the reaper recovering and re-queuing the job. When the slow worker finishes and tries to write the job status back to the DB, verify that the database update query affects 0 rows.
+9. **Duplicate Execution Prevention**: Verify that the job's `ownership_token` check correctly prevents stale execution updates from overwriting the job's state.
+10. **Idempotent Job Submission**: Verify that submitting two job requests with the same `(project_id, idempotency_key)` returns the same job record ID and details, and creates only a single row in the database.
+11. **Authorization/Resource Isolation**: Verify that API requests to queue a job or view logs for Project B using credentials authorized only for Project A return HTTP `403 Forbidden`.
+12. **AI Service Failure**: Verify that if the AI diagnosis service is completely offline, unreachable, or returns a 500 error, worker executions and job retry/DLQ transitions function successfully.
+
 
 ---
 
