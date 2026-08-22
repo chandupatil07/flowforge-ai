@@ -2,8 +2,28 @@
 
 All notable changes to the **FlowForge AI** project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+---
+
+## [0.2.0] - 2026-08-22
+
+### Added
+- **Phase 2.3 — API Contracts & Database Design**:
+  - Created `docs/04-api-contracts-and-database-design.md` detailing the logical PostgreSQL schema, composite indices, and constraints.
+  - Formulated the concurrent claiming query utilizing `SELECT FOR UPDATE SKIP LOCKED` and database-level fencing token invariants.
+  - Mapped API contracts (REST routes, inputs, outputs, errors) for authentication, projects, queues, jobs, batches, crons, and DLQ.
+- **Phase 2.2 — Module & Class Layouts**:
+  - Created `docs/03-module-class-layouts.md` mapping logical components across Control, Execution, and AI Diagnostics planes.
+  - Specified logical components (Authenticator, Authorizer, SchedulerService, BatchManager, Executor, etc.) with responsibilities, inputs/outputs, and invariants.
+  - Established dependency direction rules, state ownership guidelines, and a Mermaid interaction flow diagram.
+- **Phase 2.1 — System Architecture Principles**:
+  - Created `docs/02-system-architecture.md` outlining the platform's architectural framework.
+  - Defined 12 core architecture goals and 10 design principles.
+  - Outlined the system boundary mapping UI, Control Plane (FastAPI), DB (PostgreSQL), Scheduler, Worker system, Reaper, and Observability layers.
+  - Classified responsibilities and plane boundaries (Control vs. Execution).
+  - Codified system correctness invariants (including batch terminal state propagation).
+  - Specified technology constraints and defined failure behavior policies (including cron missed-window grace rules).
+  - Explicitly defined the API/control-plane rate-limiting boundary to protect protected API operations (like job creation) while deferring concrete mechanisms and thresholds to later phases.
+  - Setup architectural rules and identified deferred design decisions for future sub-phases.
 
 ---
 

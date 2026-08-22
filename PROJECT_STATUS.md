@@ -8,17 +8,17 @@ This document tracks the execution phases, milestone status, file modifications,
 
 | Metric | Status / Value |
 | :--- | :--- |
-| **Current Phase** | **PHASE 1 — REQUIREMENTS & SYSTEM ANALYSIS** |
-| **Phase Status** | **REVISED — PENDING FINAL REVIEW** |
-| **Overall Completion** | **7%** |
-| **Next Action** | Obtain final review and approval from reviewer team before moving to Phase 2 |
+| **Current Phase** | **PHASE 2 — SYSTEM ARCHITECTURE (PHASE 2.3)** |
+| **Phase Status** | **PHASE 2.3 DRAFTED — PENDING REVIEW** |
+| **Overall Completion** | **12%** |
+| **Next Action** | Obtain review and approval of Phase 2.3 from the Project Owner before proceeding to Phase 3 |
 
 ---
 
 ## 2. Phase Checklist
 
 - [x] **PHASE 0: Project Understanding**
-- [/] **PHASE 1: Requirements & System Analysis**
+- [x] **PHASE 1: Requirements & System Analysis**
   - [x] Problem statement & target users defined
   - [x] Detailed functional & non-functional requirements specified
   - [x] Scheduling type specifications (immediate, delayed, scheduled, cron, batch) detailed
@@ -31,7 +31,10 @@ This document tracks the execution phases, milestone status, file modifications,
   - [x] Documentation foundation created (`.gitignore`, `README.md`, `PROJECT_STATUS.md`, `CHANGELOG.md`, `docs/01-project-requirements.md`)
   - [x] REVISED: Strengthened requirements based on independent review (Timeouts, Queue Concurrency, Execution Model, Fencing, Heartbeats, RBAC, Idempotency, AI UI, Log Retention, Testing Specs)
   - [x] ADDENDUM: Incorporated Phase 1 Final Addendum corrections (Cron missed window policies, Batch terminal states & callback triggers, Job payload size limits, and job creation route rate limiting)
-- [ ] **PHASE 2: System Architecture** (NOT STARTED)
+- [/] **PHASE 2: System Architecture** (IN PROGRESS)
+  - [x] Phase 2.1: Architecture Principles & System Boundaries (APPROVED)
+  - [x] Phase 2.2: Module & Class Layouts (APPROVED)
+  - [/] Phase 2.3: API Contracts & Database Design (PENDING REVIEW)
 - [ ] **PHASE 3: Database Design** (NOT STARTED)
 - [ ] **PHASE 4: Backend Foundation** (NOT STARTED)
 - [ ] **PHASE 5: Job Scheduling Engine** (NOT STARTED)
@@ -51,6 +54,9 @@ This document tracks the execution phases, milestone status, file modifications,
 ## 3. Work Tracking
 
 ### Completed Work
+- **PHASE 2.3**: Drafted `docs/04-api-contracts-and-database-design.md` detailing the logical PostgreSQL tables, atomic claim CTE query, security boundaries, rate limiting, and HTTP REST endpoint specs.
+- **PHASE 2.2**: Drafted `docs/03-module-class-layouts.md` defining system modules, component classes, boundaries, allowed/forbidden dependency vectors, concurrency features, and failure responsibilities.
+- **PHASE 2.1**: Drafted `docs/02-system-architecture.md` defining system architecture principles, goals, component responsibilities, control plane vs. execution plane boundaries, security filters, data ownership constraints, horizontal scalability patterns, failure recovery behaviors, and a list of deferred architectural decisions.
 - Initialized the empty git repository with `.gitignore` file.
 - Created `README.md` defining project roles, phase plan, and overall objectives.
 - Produced `docs/01-project-requirements.md` containing 40 comprehensive points detailing problem statement, authentication, scheduling types, job lifecycle state transitions, worker requirements, AI fail-safes, and non-functional guarantees.
