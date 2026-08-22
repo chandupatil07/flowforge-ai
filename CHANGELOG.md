@@ -7,6 +7,8 @@ All notable changes to the **FlowForge AI** project will be documented in this f
 ## [0.2.0] - 2026-08-22
 
 ### Added
+- **Phase 2.6 — Technical Design Decisions & Trade-offs**:
+  - Created `docs/07-design-decisions.md` specifying reasons, trade-offs, and mitigations for database choices, locking structures, subprocess isolation, static task registries, and async APIs.
 - **Phase 2.5 — AI Diagnostics Architecture & Prompt Design**:
   - Created `docs/06-ai-architecture.md` specifying the asynchronous failure diagnostics workflow, failsafe isolation, prompt template, local HTTP client target hosting model, and local testing mock engine.
 - **Phase 2.4 — Sequence Flows & Runtime Interaction Designs**:
