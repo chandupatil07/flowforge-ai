@@ -7,6 +7,8 @@ All notable changes to the **FlowForge AI** project will be documented in this f
 ## [0.2.0] - 2026-08-22
 
 ### Added
+- **Phase 2.5 — AI Diagnostics Architecture & Prompt Design**:
+  - Created `docs/06-ai-architecture.md` specifying the asynchronous failure diagnostics workflow, failsafe isolation, prompt template, local HTTP client target hosting model, and local testing mock engine.
 - **Phase 2.4 — Sequence Flows & Runtime Interaction Designs**:
   - Created `docs/05-sequence-flows.md` specifying critical runtime sequence flows using Mermaid diagrams.
   - Defined interaction sequence designs for atomic job claiming, sandbox task execution, liveness heartbeats & Reaper sweep loops, cron trigger scheduler occurrence prevention, and batch child completion.

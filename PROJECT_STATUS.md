@@ -8,10 +8,10 @@ This document tracks the execution phases, milestone status, file modifications,
 
 | Metric | Status / Value |
 | :--- | :--- |
-| **Current Phase** | **PHASE 2 — SYSTEM ARCHITECTURE (PHASE 2.4)** |
-| **Phase Status** | **PHASE 2.4 DRAFTED — PENDING REVIEW** |
-| **Overall Completion** | **15%** |
-| **Next Action** | Obtain review and approval of Phase 2.4 from the Project Owner before proceeding to Phase 3 |
+| **Current Phase** | **PHASE 2 — SYSTEM ARCHITECTURE (PHASE 2.5)** |
+| **Phase Status** | **PHASE 2.5 DRAFTED — PENDING REVIEW** |
+| **Overall Completion** | **18%** |
+| **Next Action** | Obtain review and approval of Phase 2.5 from the Project Owner before proceeding to Phase 3 |
 
 ---
 
@@ -35,7 +35,8 @@ This document tracks the execution phases, milestone status, file modifications,
   - [x] Phase 2.1: Architecture Principles & System Boundaries (APPROVED)
   - [x] Phase 2.2: Module & Class Layouts (APPROVED)
   - [x] Phase 2.3: API Contracts & Database Design (APPROVED)
-  - [/] Phase 2.4: Sequence Flows & Runtime Interaction Designs (PENDING REVIEW)
+  - [x] Phase 2.4: Sequence Flows & Runtime Interaction Designs (APPROVED)
+  - [/] Phase 2.5: AI Diagnostics Architecture & Prompt Design (PENDING REVIEW)
 - [ ] **PHASE 3: Database Design** (NOT STARTED)
 - [ ] **PHASE 4: Backend Foundation** (NOT STARTED)
 - [ ] **PHASE 5: Job Scheduling Engine** (NOT STARTED)
@@ -55,6 +56,7 @@ This document tracks the execution phases, milestone status, file modifications,
 ## 3. Work Tracking
 
 ### Completed Work
+- **PHASE 2.5**: Created `docs/06-ai-architecture.md` detailing the AI Diagnostics Plane failure workflow, prompt design template, failsafe fault isolation, OpenAI-compatible HTTP client wrapper design, and local unit test mock strategy.
 - **PHASE 2.4**: Created `docs/05-sequence-flows.md` defining core execution sequences (Claiming, Execution, Reaper sweeps, Cron scheduler grace windows, Batch callbacks) with Mermaid diagrams and correctness rules.
 - **PHASE 2.3**: Drafted `docs/04-api-contracts-and-database-design.md` detailing the logical PostgreSQL tables, atomic claim CTE query, security boundaries, rate limiting, and HTTP REST endpoint specs.
 - **PHASE 2.2**: Drafted `docs/03-module-class-layouts.md` defining system modules, component classes, boundaries, allowed/forbidden dependency vectors, concurrency features, and failure responsibilities.
