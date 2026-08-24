@@ -16,8 +16,3 @@ FlowForge AI is a production-inspired, highly reliable distributed job schedulin
 
 
 
-## Project Setup & Documentation
-Documentation is situated in the `docs/` folder:
-- [01-project-requirements.md](file:///c:/Users/balaj/OneDrive/Desktop/flowforge-ai/docs/01-project-requirements.md) (Current phase detailed requirements spec).
-
-*Note: Code base setup and development will start in subsequent phases upon requirement review and approval.*
