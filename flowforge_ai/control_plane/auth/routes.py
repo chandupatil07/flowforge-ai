@@ -85,6 +85,15 @@ def create_project(project_data: ProjectCreate, current_user: User = Depends(get
     
     return project
 
+@router.get("/projects", response_model=list[ProjectOut])
+def list_my_projects(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Every project the current user belongs to (as OWNER/DEVELOPER/OPERATOR).
+    memberships = db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()
+    project_ids = [m.project_id for m in memberships]
+    if not project_ids:
+        return []
+    return db.query(Project).filter(Project.id.in_(project_ids)).all()
+
 @router.get("/projects/{project_id}", response_model=ProjectOut)
 def get_project(
     project_id: str,

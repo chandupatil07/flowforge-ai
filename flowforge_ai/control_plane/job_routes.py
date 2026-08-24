@@ -3,7 +3,7 @@ import sys
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -261,6 +261,26 @@ def submit_job(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create job")
 
     return job
+
+
+@router.get("/jobs", response_model=list[JobOut])
+def list_jobs(
+    project_id: str,
+    queue_name: Optional[str] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    _verify_membership(db, project_id, current_user, ["OWNER", "DEVELOPER", "OPERATOR"])
+    q = db.query(Job).filter(Job.project_id == project_id)
+    if queue_name:
+        queue = db.query(Queue).filter(Queue.project_id == project_id, Queue.name == queue_name).first()
+        if not queue:
+            return []
+        q = q.filter(Job.queue_id == queue.id)
+    if status_filter:
+        q = q.filter(Job.status == status_filter)
+    return q.order_by(Job.created_at.desc()).limit(200).all()
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)

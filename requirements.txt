@@ -5,7 +5,9 @@ pydantic
 pydantic-settings
 PyJWT
 passlib[bcrypt]
+bcrypt==4.0.1
 python-multipart
 alembic
 pytest
 httpx
+psycopg2-binary
