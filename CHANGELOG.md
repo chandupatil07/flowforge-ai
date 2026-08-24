@@ -4,6 +4,17 @@ All notable changes to the **FlowForge AI** project will be documented in this f
 
 ---
 
+## [1.0.0] - 2026-08-24
+
+### Added
+- **STAGE 1 — Database & Backend Foundation**:
+  - Initialized SQLAlchemy database engine and connection dependencies.
+  - Implemented Alembic migrations for initial table schemas, addressing mutually dependent constraints between jobs and batches.
+  - Defined physical SQLAlchemy schemas with composite check constraints and project tenancy indices.
+  - Created authentication endpoints (`POST /api/v1/auth/register`, `POST /api/v1/auth/login`) with bcrypt and JWT signatures.
+  - Implemented Project tenant isolation and RBAC security filter scopes (`RoleChecker`).
+  - Added unit test suite (`tests/test_stage1.py`) verifying database isolation and authorization borders.
+
 ## [0.2.0] - 2026-08-22
 
 ### Added

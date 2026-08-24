@@ -11,7 +11,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, foreign
 from sqlalchemy.sql import func
 from flowforge_ai.database import Base
 
@@ -41,7 +41,7 @@ class Project(Base):
     batches = relationship("Batch", back_populates="project", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="project", cascade="all, delete-orphan")
     cron_configs = relationship("CronConfig", back_populates="project", cascade="all, delete-orphan")
-    ai_diagnostics = relationship("AIDiagnostics", primaryjoin="Project.id == AIDiagnostics.project_id", back_populates="project", cascade="all, delete-orphan")
+    ai_diagnostics = relationship("AIDiagnostics", primaryjoin="Project.id == foreign(AIDiagnostics.project_id)", back_populates="project", cascade="all, delete-orphan")
 
 class ProjectMember(Base):
     __tablename__ = "project_members"
@@ -220,7 +220,7 @@ class AIDiagnostics(Base):
     remediation_suggestion = Column(Text, nullable=True)
     analyzed_at = Column(DateTime(timezone=True), nullable=True)
 
-    project = relationship("Project", primaryjoin="Project.id == AIDiagnostics.project_id", back_populates="ai_diagnostics")
+    project = relationship("Project", primaryjoin="Project.id == foreign(AIDiagnostics.project_id)", back_populates="ai_diagnostics")
 
     __table_args__ = (
         CheckConstraint(diagnostic_status.in_(["NOT_REQUESTED", "ANALYZING", "COMPLETED", "FAILED", "UNAVAILABLE"]), name="chk_ai_diagnostics_status"),
